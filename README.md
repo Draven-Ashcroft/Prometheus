@@ -23,8 +23,8 @@ Interactive 3D educational simulator for exploring human joints through intuitiv
 - Ball-and-Socket Joint
 - Hinge Joint
 - Pivot Joint
-- Gliding (Plane) Joint
-- Cartilaginous Joint
+- Cartilagenous Joint
+- Synovial Joint
 - Fixed (Fibrous) Joint
 
 ---
@@ -36,7 +36,7 @@ Interactive 3D educational simulator for exploring human joints through intuitiv
 
 ---
 
-## 🛠️ AI Credits & Acknowledgments
+## 🛠️ Acknowledgments
 
 - **Moonshot AI (Kimi 2.6):** From basic widget generation to raw structured code.
 - **Perplexity AI:** Code refinement and optimization.
