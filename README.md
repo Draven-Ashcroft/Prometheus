@@ -38,10 +38,10 @@ Interactive 3D educational simulator for exploring human joints through intuitiv
 
 ## 🛠️ Acknowledgments
 
-- **Moonshot AI (Kimi 2.6):** From basic widget generation to raw structured code.
+- **Moonshot AI (Kimi 2.6):** Initial structured code.
 - **Perplexity AI:** Code refinement and optimization.
-- **OpenAI:** Prompt engineering, debugging, scientific validation, and testing.
-- **Claude (Anthropic Sonnet 5):** Final code architecture, UI implementation, and application refinement.
+- **OpenAI:** Debugging, scientific validation.
+- **Claude (Anthropic Sonnet 5):** Final code architecture, UI implementation.
 
 ---
 
