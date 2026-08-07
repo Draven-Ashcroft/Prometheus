@@ -2,7 +2,7 @@
   <img src="assets/banner.png" alt="Prometheus Synotrix - Joint Simulator Banner" width="100%">
 </p>
 
-# ⚕️ Prometheus : Joint Simulator
+# ⚕️ Prometheus Synotrix : Joint Simulator
 
 Interactive 3D educational simulator for exploring human joints through intuitive visualization and animation, aligned with the latest NCERT curriculum.
 
