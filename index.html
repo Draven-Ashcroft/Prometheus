@@ -6,7 +6,7 @@
 <style>  
   @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500&family=Noto+Sans:wght@300;400;500&display=swap');  
   *{margin:0;padding:0;box-sizing:border-box}  
-  body{font-family:Roboto,'Noto Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;background:#08080a;min-height:100vh;padding:28px;color:#a8a49e;overflow-x:hidden}  
+  body{font-family:Roboto,'Noto Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;background:#08080a;min-height:100vh;padding:28px;padding-bottom:100px;color:#a8a49e;overflow-x:hidden}  
   h1{text-align:center;color:#c8c4bc;margin-top:52px;margin-bottom:6px;font-size:22px;font-weight:400;letter-spacing:4px}  
   .subtitle{text-align:center;color:#4a4844;margin-bottom:36px;font-size:10px;letter-spacing:3px;text-transform:uppercase;font-weight:400}  
   .flowchart{display:none;flex-direction:column;align-items:center;gap:0}  
@@ -86,6 +86,17 @@
   .info-card-body p{font-size:11px;line-height:1.7;color:#a8a49e;margin:0 0 8px 0;letter-spacing:0.2px}
   .info-card-body p:last-child{margin-bottom:0}
   @media(min-width:700px){.info-card{width:400px}}
+
+  /* ─── INSPECT MODE (new, additive only) ─── */
+  .inspect-toggle{position:absolute;top:10px;right:10px;z-index:15;display:flex;align-items:center;gap:6px;background:rgba(10,10,14,0.72);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:1px solid rgba(232,196,104,0.25);border-radius:20px;padding:6px 12px;cursor:pointer;user-select:none;font-size:9px;letter-spacing:1.5px;text-transform:uppercase;color:#8a8078;transition:.2s}
+  .inspect-toggle:hover{border-color:rgba(232,196,104,0.45)}
+  .inspect-toggle .inspect-dot{width:7px;height:7px;border-radius:50%;background:#4a4844;transition:.2s;flex-shrink:0}
+  .inspect-toggle.active{border-color:rgba(232,196,104,0.6);color:#e8c468}
+  .inspect-toggle.active .inspect-dot{background:#e8c468;box-shadow:0 0 6px rgba(232,196,104,0.8)}
+  .inspect-card{position:absolute;left:0;right:0;bottom:0;background:rgba(10,10,14,0.95);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-top:1px solid rgba(232,196,104,0.22);border-radius:12px 12px 0 0;padding:14px 18px 16px 18px;transform:translateY(100%);transition:transform .28s cubic-bezier(.4,0,.2,1);z-index:16;pointer-events:none}
+  .inspect-card.visible{transform:translateY(0);pointer-events:auto}
+  .inspect-card-title{font-size:13px;color:#e8c468;letter-spacing:0.5px;font-weight:400;margin-bottom:4px}
+  .inspect-card-desc{font-size:11px;color:#a8a49e;line-height:1.55;margin:0}
 </style>  
 </head>  
 <body>
@@ -141,6 +152,13 @@
   </div>  
   <div class="card-dia" id="dia">  
     <div class="controls-info">Left-click: Rotate &bull; Right-click: Pan &bull; Scroll: Zoom</div>  
+    <div class="inspect-toggle" id="inspectToggle" onclick="toggleInspectMode()">
+      <span class="inspect-dot"></span><span>Inspect</span>
+    </div>
+    <div class="inspect-card" id="inspectCard">
+      <div class="inspect-card-title" id="inspectCardTitle"></div>
+      <p class="inspect-card-desc" id="inspectCardDesc"></p>
+    </div>
   </div>  
   <div class="accordion-grid">  
     <div class="accordion-item open" id="acc-desc">  
@@ -331,6 +349,29 @@ function disposeCurrent(){
   // The renderer/canvas itself is intentionally NOT disposed or removed  
   // here — it's the shared, session-long WebGL context (see  
   // getSharedRenderer above). Only the per-build scene contents go away.  
+  //
+  // currentControls DOES need disposal here even though the canvas is
+  // shared: initBaseScene() creates a brand new OrbitControls on every
+  // single joint switch, and OrbitControls attaches its own pointerdown/
+  // pointermove/pointerup/wheel/touchstart/contextmenu listeners directly
+  // to that shared canvas. Without calling .dispose() (which removes
+  // those listeners), every switch between joint types left the previous
+  // instance's listeners attached forever -- one extra full set per
+  // switch, accumulating for the whole session, each one still firing
+  // (just harmlessly driving an orphaned camera that's no longer
+  // rendered) on every drag/scroll. Not visually obvious, but a real,
+  // compounding performance cost across a long testing session.
+  if(currentControls) currentControls.dispose();  
+  // Fixed joint's suture-click listeners (see buildFixed) attach directly
+  // to this same shared canvas and were never being removed on navigating
+  // away -- clean them up here using the references buildFixed stashed on
+  // itself, and null them out so this only ever runs once per load.
+  if(currentRenderer && buildFixed._onPointerMove){  
+    currentRenderer.domElement.removeEventListener('mousemove', buildFixed._onPointerMove);  
+    currentRenderer.domElement.removeEventListener('click', buildFixed._onClick);  
+    buildFixed._onPointerMove = null;  
+    buildFixed._onClick = null;  
+  }  
   const infoDiv = dia.querySelector('.controls-info');  
   if(infoDiv) infoDiv.innerHTML = 'Left-click: Rotate &bull; Right-click: Pan &bull; Scroll: Zoom';  
   const existingLoading = dia.querySelector('.loading-overlay');  
@@ -438,6 +479,13 @@ function buildFixed(){
   let skullModel = null;  
   
   loader.load(SKULL_URL, (gltf) => {  
+    // Guard against a stale load: if the user has already navigated to a
+    // different joint by the time this async callback fires, currentScene
+    // now points elsewhere. Without this check, a slow model load
+    // completing after navigating away would still attach the suture
+    // click listeners to the canvas for whatever joint is showing now,
+    // and add the skull into a scene nothing renders anymore.
+    if (currentScene !== scene) return;  
     skullModel = gltf.scene;  
     skullModel.traverse((child) => {  
       if(child.isMesh) {  
@@ -460,46 +508,6 @@ function buildFixed(){
     skullModel.position.y += 0.15;  
   
     group.add(skullModel);  
-  
-    const sutureMatBase = new THREE.MeshStandardMaterial({  
-      color: 0x9a8a7a, roughness: 0.95, emissive: 0xffaa55, emissiveIntensity: 0.0  
-    });  
-  
-    function createSutureTube(curvePoints, radius, type, name) {  
-      const pts = curvePoints.map(p => new THREE.Vector3(...p));  
-      const curve = new THREE.CatmullRomCurve3(pts);  
-      const geo = new THREE.TubeGeometry(curve, 64, radius, 8, false);  
-      const mesh = new THREE.Mesh(geo, sutureMatBase.clone());  
-      mesh.userData = {type, name};  
-      return mesh;  
-    }  
-  
-    const coronalSuture = createSutureTube([  
-      [-0.95, 0.85, 0.55], [-0.55, 0.95, 0.65], [-0.15, 1.02, 0.68],  
-      [0.15, 1.02, 0.68], [0.55, 0.95, 0.65], [0.95, 0.85, 0.55]  
-    ], 0.018, 'coronal', 'Coronal Suture');  
-    group.add(coronalSuture);  
-  
-    const sagittalSuture = createSutureTube([  
-      [0, 1.0, 0.6], [0, 1.18, 0.2], [0, 1.22, -0.2], [0, 1.15, -0.6], [0, 1.02, -0.95]  
-    ], 0.018, 'sagittal', 'Sagittal Suture');  
-    group.add(sagittalSuture);  
-  
-    const lambdoidSuture = createSutureTube([  
-      [-0.85, 0.75, -0.85], [-0.45, 0.92, -1.05], [-0.1, 1.0, -1.12],  
-      [0.1, 1.0, -1.12], [0.45, 0.92, -1.05], [0.85, 0.75, -0.85]  
-    ], 0.018, 'lambdoid', 'Lambdoid Suture');  
-    group.add(lambdoidSuture);  
-  
-    const squamousSutureL = createSutureTube([  
-      [-1.15, 0.35, 0.45], [-1.22, 0.1, 0.0], [-1.2, -0.05, -0.4], [-1.12, -0.15, -0.75]  
-    ], 0.014, 'squamous', 'Squamous Suture');  
-    group.add(squamousSutureL);  
-  
-    const squamousSutureR = createSutureTube([  
-      [1.15, 0.35, 0.45], [1.22, 0.1, 0.0], [1.2, -0.05, -0.4], [1.12, -0.15, -0.75]  
-    ], 0.014, 'squamous', 'Squamous Suture');  
-    group.add(squamousSutureR);  
   
     const gomphHit = new THREE.Mesh(  
       new THREE.SphereGeometry(0.16, 16, 16),  
@@ -531,10 +539,7 @@ function buildFixed(){
     gomphSocket.rotation.x = 0.1;  
     group.add(gomphSocket);  
   
-    const clickableObjects = [  
-      coronalSuture, sagittalSuture, lambdoidSuture,  
-      squamousSutureL, squamousSutureR, gomphHit  
-    ];  
+    const clickableObjects = [gomphHit];  
   
     const raycaster = new THREE.Raycaster();  
     const mouse = new THREE.Vector2();  
@@ -566,7 +571,7 @@ function buildFixed(){
     function highlightSuture(type) {  
       clickableObjects.forEach(obj => {  
         if(obj.material && obj.material.emissive) {  
-          obj.material.emissiveIntensity = (obj.userData.type === type) ? 0.6 : 0.0;  
+          obj.material.emissiveIntensity = (obj.userData.type === type) ? 0.6 : 0.22;  
         }  
       });  
       if(type === 'gomphosis') {  
@@ -580,10 +585,6 @@ function buildFixed(){
   
     function animateCamera(type) {  
       const targets = {  
-        coronal: { pos: new THREE.Vector3(0, 2.2, 4.5), look: new THREE.Vector3(0, 0.6, 0.5) },  
-        sagittal: { pos: new THREE.Vector3(0, 4.5, 0.3), look: new THREE.Vector3(0, 0.7, -0.2) },  
-        lambdoid: { pos: new THREE.Vector3(0, 2.0, -4.5), look: new THREE.Vector3(0, 0.6, -0.8) },  
-        squamous: { pos: new THREE.Vector3(4.5, 1.0, 0.2), look: new THREE.Vector3(1.2, 0.1, -0.2) },  
         gomphosis: { pos: new THREE.Vector3(-0.8, -1.8, 3.8), look: new THREE.Vector3(-0.3, -0.5, 1.0) }  
       };  
       const t = targets[type];  
@@ -657,15 +658,23 @@ function buildFixed(){
     buildFixed._camAnim = camAnim;  
     buildFixed._selectedType = () => selectedType;  
     buildFixed._hoveredObj = () => hoveredObj;  
+    // Stored so disposeCurrent() can remove these on navigating away --
+    // without this, they stay attached to the shared canvas forever,
+    // and firing them against disposed suture geometry from a totally
+    // different joint's view was silently overwriting that joint's
+    // info card with skull suture data on every click. See disposeCurrent().
+    buildFixed._onPointerMove = onPointerMove;  
+    buildFixed._onClick = onClick;  
   
   }, undefined, (err) => {  
+    if (currentScene !== scene) return;  
     console.error('Skull model load error:', err);  
     loadingDiv.innerHTML = '<div class="loading-text" style="color:#8a5a5a">Failed to load model</div>';  
   });  
   
   const infoDiv = dia.querySelector('.controls-info');  
   if(infoDiv) {  
-    infoDiv.innerHTML = 'Left-click: Rotate &bull; Right-click: Pan &bull; Scroll: Zoom &nbsp;&nbsp;<span style="color:#8a7a6a">| Click sutures to explore</span>';  
+    infoDiv.innerHTML = 'Left-click: Rotate &bull; Right-click: Pan &bull; Scroll: Zoom &nbsp;&nbsp;<span style="color:#8a7a6a">| Click the tooth to explore</span>';  
   }  
   
   camera.position.set(4, 3, 6);  
@@ -784,7 +793,13 @@ function buildSlightly(){
     supCyl.position.y = -comp; infCyl.position.y = comp;  
     annulusGroup.scale.y = 1 - comp*2;  
   }  
-  return {scene, camera, renderer, controls, anim};  
+  const inspectables = [
+    {mesh: nucleus, label:'Intervertebral Disc', desc:'A cushion of cartilage between vertebrae. Absorbs shock and allows slight movement of the spine.'},
+    {mesh: endplate1, label:'Intervertebral Disc', desc:'A cushion of cartilage between vertebrae. Absorbs shock and allows slight movement of the spine.'},
+    {mesh: endplate2, label:'Intervertebral Disc', desc:'A cushion of cartilage between vertebrae. Absorbs shock and allows slight movement of the spine.'},
+    ...annulusGroup.children.map(m => ({mesh: m, label:'Intervertebral Disc', desc:'A cushion of cartilage between vertebrae. Absorbs shock and allows slight movement of the spine.'}))
+  ];
+  return {scene, camera, renderer, controls, anim, inspectables};  
 }  
   
 /* ─── 3. FREELY MOVABLE (SYNOVIAL JOINT) ─── */
@@ -901,7 +916,18 @@ function buildFreely(){
     bone1Group.rotation.z = Math.cos(t*0.6)*0.06;
     bone2Group.rotation.x = -Math.sin(t*0.8)*0.09;
   }  
-  return {scene, camera, renderer, controls, anim};  
+  const inspectables = [
+    {mesh: bone1, label:'Bone', desc:'One of the two bones forming this joint. Its rounded end (epiphysis) is where the articulating surface begins.'},
+    {mesh: bone2, label:'Bone', desc:'One of the two bones forming this joint. Its rounded end (epiphysis) is where the articulating surface begins.'},
+    {mesh: cart1, label:'Articular Cartilage', desc:'Smooth tissue covering the bone ends. Reduces friction and cushions the joint during movement.'},
+    {mesh: cart2, label:'Articular Cartilage', desc:'Smooth tissue covering the bone ends. Reduces friction and cushions the joint during movement.'},
+    {mesh: capsule, label:'Joint Capsule', desc:'A fibrous sleeve enclosing the joint, lined with a synovial membrane that produces lubricating fluid.'},
+    {mesh: synovium, label:'Joint Capsule', desc:'A fibrous sleeve enclosing the joint, lined with a synovial membrane that produces lubricating fluid.'},
+    {mesh: fluid, label:'Synovial Fluid', desc:'A slippery fluid filling the joint cavity. Reduces friction and nourishes the cartilage.'},
+    {mesh: ligL, label:'Ligament', desc:'Tough fibrous tissue connecting bone to bone. Stabilizes the joint and limits excess movement.'},
+    {mesh: ligM, label:'Ligament', desc:'Tough fibrous tissue connecting bone to bone. Stabilizes the joint and limits excess movement.'}
+  ];
+  return {scene, camera, renderer, controls, anim, inspectables};  
 }  
   
 /* ─── 4. BALL & SOCKET — Anatomically Accurate Shoulder (Glenohumeral) Joint ─── */  
@@ -1052,7 +1078,16 @@ function buildBallSocket(){
     humerusGroup.position.x = Math.sin(phase)*0.05;  
     humerusGroup.position.z = Math.cos(phase)*0.05;  
   }  
-  return {scene, camera, renderer, controls, anim};  
+  const inspectables = [
+    {mesh: head, label:'Humerus', desc:'Upper arm bone. Its rounded head fits into the shallow socket of the scapula.'},
+    {mesh: neck, label:'Humerus', desc:'Upper arm bone. Its rounded head fits into the shallow socket of the scapula.'},
+    {mesh: shaft, label:'Humerus', desc:'Upper arm bone. Its rounded head fits into the shallow socket of the scapula.'},
+    {mesh: scapula, label:'Scapula', desc:'Shoulder blade. A flat bone that forms the socket side of the shoulder joint.'},
+    {mesh: socket, label:'Glenoid Cavity', desc:'The shallow socket in the scapula that the humeral head fits into. Its shallowness gives the shoulder its huge range of motion.'},
+    {mesh: headCart, label:'Articular Cartilage', desc:'Smooth tissue covering the joint surfaces. Reduces friction during movement.'},
+    {mesh: socketCart, label:'Articular Cartilage', desc:'Smooth tissue covering the joint surfaces. Reduces friction during movement.'}
+  ];
+  return {scene, camera, renderer, controls, anim, inspectables};  
 }  
   
   
@@ -1149,6 +1184,21 @@ function buildHinge(){
   humerusBody.castShadow = true;
   humerusGroup.add(humerusBody);
 
+  // Top cap — LatheGeometry is an open revolved surface, not a solid; it
+  // has no cap at either end. The bottom end is hidden inside the
+  // condyle mass so it was never visible, but the top end is the very
+  // tip of the shaft sticking up into open space. From most angles the
+  // open rim was too thin to notice, but from some rotations it read as
+  // an asymmetric scooped notch cut into the top of the bone. Added as
+  // a child of humerusBody so it automatically inherits the same
+  // position and elliptical z-scale, guaranteeing it lines up exactly
+  // with the lathe's own top rim rather than needing a second,
+  // hand-matched transform.
+  const humerusTopCap = new THREE.Mesh(new THREE.CircleGeometry(0.105, 40), ivoryMat);
+  humerusTopCap.position.set(0, 1.900, 0);
+  humerusTopCap.rotation.x = -Math.PI / 2;
+  humerusBody.add(humerusTopCap);
+
   // Medial epicondyle — prominent medial bump. Repositioned to touch
   // the now-narrower flare (was -0.32, calibrated for the old, much
   // thicker condyle band); re-validated to overlap by ~0.02 at its base.
@@ -1174,15 +1224,24 @@ function buildHinge(){
   const trochleaGroup = new THREE.Group();  
   
   const trochProfile = [  
-    new THREE.Vector2(0.150, 0.00),   // medial rim (larger flange)  
-    new THREE.Vector2(0.148, 0.03),  
-    new THREE.Vector2(0.128, 0.09),  
-    new THREE.Vector2(0.098, 0.15),  
+    new THREE.Vector2(0.130, 0.00),   // lateral rim (smaller flange, toward capitulum)  
+    new THREE.Vector2(0.138, 0.03),  
+    new THREE.Vector2(0.122, 0.09),  
+    new THREE.Vector2(0.096, 0.15),  
     new THREE.Vector2(0.088, 0.17),   // groove floor (narrowest point)  
-    new THREE.Vector2(0.096, 0.19),  
-    new THREE.Vector2(0.122, 0.25),  
-    new THREE.Vector2(0.138, 0.30),  
-    new THREE.Vector2(0.130, 0.34)    // lateral rim (smaller flange)  
+    new THREE.Vector2(0.098, 0.19),  
+    new THREE.Vector2(0.128, 0.25),  
+    new THREE.Vector2(0.148, 0.30),  
+    new THREE.Vector2(0.150, 0.34)    // medial rim (larger flange) -- real anatomy: the  
+                                       // medial flange projects further than the lateral  
+                                       // one, contributing to the forearm's carrying angle.  
+                                       // This was previously backwards (verified directly  
+                                       // against the built geometry's world-space radii,  
+                                       // not just the profile array) -- the world_x mapping  
+                                       // for this lathe runs opposite to what a naive read  
+                                       // of the y-values would suggest, so the original  
+                                       // profile had medial and lateral swapped even though  
+                                       // its own comments described the correct anatomy.  
   ];  
   const trochGeo = new THREE.LatheGeometry(trochProfile, 40);  
   trochGeo.translate(0, -0.17, 0); // center the spool on its own axis  
@@ -1324,8 +1383,8 @@ function buildHinge(){
   // y_profile, so e.g. y_profile=0 (r=0.150) sits at world_x=+0.17,
   // not -0.17 as the naive reading of the profile array would suggest).
   const trochRadiusTable = [
-    [-0.170, 0.130], [-0.130, 0.138], [-0.080, 0.122], [-0.020, 0.096],
-    [0.000, 0.088], [0.020, 0.098], [0.080, 0.128], [0.140, 0.148], [0.170, 0.150]
+    [-0.170, 0.150], [-0.130, 0.148], [-0.080, 0.128], [-0.020, 0.098],
+    [0.000, 0.088], [0.020, 0.096], [0.080, 0.122], [0.140, 0.138], [0.170, 0.130]
   ];
   function trochRadiusAt(x) {
     if (x <= trochRadiusTable[0][0]) return trochRadiusTable[0][1];
@@ -1456,27 +1515,125 @@ function buildHinge(){
   
   radiusGroup.position.set(-HINGE_AXIS.x, -HINGE_AXIS.y, -HINGE_AXIS.z);  
   forearmPivot.add(radiusGroup);  
+  // ═══════════════════════════════════════════════════════════════  
+  //  HAND — simplified skeletal hand replacing the forearm's open
+  //  cylindrical termination. Same offset convention as ulnaGroup/
+  //  radiusGroup above (cancels forearmPivot's own translation) so
+  //  coordinates here can be authored in the same simple space as
+  //  ulnaShaft/radShaft's own positions, and so the whole hand moves
+  //  correctly with the forearm during elbow flexion.
+  //
+  //  Ulna's distal tip sits at (0,-2.65,0) r=0.11; radius's distal tip
+  //  sits at (0.34,-2.5,0.06) r=0.065 (both computed from their
+  //  existing, unmodified geometry -- neither was changed).
+  // ═══════════════════════════════════════════════════════════════  
+  const handGroup = new THREE.Group();  
+  handGroup.position.set(-HINGE_AXIS.x, -HINGE_AXIS.y, -HINGE_AXIS.z);  
+
+  // Reusable helper: places a capsule bone from startPos along direction
+  // for the given length, returning the endpoint so segments can chain
+  // (a finger is just repeated calls, each starting where the last
+  // ended -- this guarantees no gaps between chained segments).
+  function addBoneSegment(startPos, direction, length, radius, mat){  
+    const dir = direction.clone().normalize();  
+    const cylLen = Math.max(0.01, length - radius*2);  
+    const geo = new THREE.CapsuleGeometry(radius, cylLen, 4, 8);  
+    const mesh = new THREE.Mesh(geo, mat);  
+    const endPos = startPos.clone().addScaledVector(dir, length);  
+    mesh.position.copy(startPos.clone().lerp(endPos, 0.5));  
+    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), dir);  
+    mesh.castShadow = true;  
+    handGroup.add(mesh);  
+    return endPos;  
+  }  
+  function addCarpal(pos, size, mat){  
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(size, 12, 10), mat);  
+    mesh.position.copy(pos);  
+    mesh.scale.set(1.1, 0.8, 1.0);  
+    mesh.castShadow = true;  
+    handGroup.add(mesh);  
+  }  
+  function addFingerPhalanges(startPos, mainDir, lengths, radii, curlAxis, curlAngleDeg, mat){  
+    let pos = startPos.clone();  
+    let dir = mainDir.clone().normalize();  
+    for (let i=0; i<lengths.length; i++){  
+      if (i>0) dir.applyAxisAngle(curlAxis, THREE.MathUtils.degToRad(curlAngleDeg)).normalize();  
+      pos = addBoneSegment(pos, dir, lengths[i], radii[i], mat);  
+    }  
+  }  
+
+  // --- Carpals: 8 bones in two rows (proximal, then distal) ---  
+  // Proximal row, radial to ulnar side: scaphoid, lunate, triquetrum, pisiform  
+  addCarpal(new THREE.Vector3(0.32, -2.66, 0.05), 0.085, ivoryMat);  
+  addCarpal(new THREE.Vector3(0.20, -2.69, 0.02), 0.075, ivoryMat);  
+  addCarpal(new THREE.Vector3(0.10, -2.68, -0.02), 0.075, ivoryMat);  
+  addCarpal(new THREE.Vector3(0.05, -2.60, -0.09), 0.055, ivoryMat);  
+  // Distal row, radial to ulnar side: trapezium, trapezoid, capitate, hamate  
+  addCarpal(new THREE.Vector3(0.35, -2.79, 0.07), 0.075, ivoryMat);  
+  addCarpal(new THREE.Vector3(0.24, -2.82, 0.03), 0.065, ivoryMat);  
+  addCarpal(new THREE.Vector3(0.14, -2.83, -0.01), 0.085, ivoryMat);  
+  addCarpal(new THREE.Vector3(0.05, -2.80, -0.05), 0.075, ivoryMat);  
+
+  // --- Metacarpals: 5, extending from the distal carpal row into the palm ---  
+  const mcpBases = [  
+    new THREE.Vector3(0.38, -2.80, 0.09),   // thumb (1st)  
+    new THREE.Vector3(0.26, -2.85, 0.04),   // index (2nd)  
+    new THREE.Vector3(0.15, -2.87, -0.01),  // middle (3rd)  
+    new THREE.Vector3(0.07, -2.85, -0.05),  // ring (4th)  
+    new THREE.Vector3(0.00, -2.80, -0.08)   // little (5th)  
+  ];  
+  const mcpDirs = [  
+    new THREE.Vector3(0.35, -0.75, 0.20).normalize(),  // thumb angles outward for opposition  
+    new THREE.Vector3(0.08, -1.0, 0.05).normalize(),  
+    new THREE.Vector3(0.0, -1.0, 0.0).normalize(),     // longest, most central  
+    new THREE.Vector3(-0.08, -1.0, -0.05).normalize(),  
+    new THREE.Vector3(-0.15, -0.95, -0.12).normalize()  
+  ];  
+  const mcpLengths = [0.28, 0.44, 0.48, 0.42, 0.34];  
+  const mcpRadii = [0.045, 0.038, 0.040, 0.036, 0.032];  
+  const mcpEnds = mcpBases.map((base, i) => addBoneSegment(base, mcpDirs[i], mcpLengths[i], mcpRadii[i], ivoryMat));  
+
+  // --- Phalanges: thumb gets 2, the other four fingers get 3 each ---  
+  // Each finger curls slightly more with each successive segment (curl
+  // axis fixed to X, rotating the direction toward the palm), giving
+  // the relaxed, slightly-flexed neutral pose without any animation.  
+  const curlAxisX = new THREE.Vector3(1,0,0);  
+  addFingerPhalanges(mcpEnds[0], mcpDirs[0], [0.16,0.12], [0.032,0.026], curlAxisX, 25, ivoryMat);  
+  addFingerPhalanges(mcpEnds[1], mcpDirs[1], [0.16,0.10,0.08], [0.028,0.023,0.019], curlAxisX, 18, ivoryMat);  
+  addFingerPhalanges(mcpEnds[2], mcpDirs[2], [0.18,0.11,0.09], [0.029,0.024,0.020], curlAxisX, 18, ivoryMat);  
+  addFingerPhalanges(mcpEnds[3], mcpDirs[3], [0.16,0.10,0.08], [0.027,0.022,0.018], curlAxisX, 18, ivoryMat);  
+  addFingerPhalanges(mcpEnds[4], mcpDirs[4], [0.12,0.08,0.07], [0.023,0.019,0.016], curlAxisX, 18, ivoryMat);  
+
+  forearmPivot.add(handGroup);  
+
   
   // ═══════════════════════════════════════════════════════════════  
   //  LIGAMENTS  
   // ═══════════════════════════════════════════════════════════════  
+  // Ligaments — redesigned to run from the epicondyle down to the
+  // forearm bones, matching real anatomy (they never reach anywhere
+  // near the shaft). The previous path extended up toward the shaft/
+  // condyle transition; even after being pulled back and recolored
+  // earlier in this project, it still coincided with that silhouette
+  // closely enough that Inspect Mode's highlight glow made it read as
+  // a crack in the bone. Confining the path to where these ligaments
+  // actually attach removes the coincidence at its source rather than
+  // trying to out-tune the color or curve shape around it.
   const uclCurve = new THREE.CatmullRomCurve3([  
-    new THREE.Vector3(-0.42, -0.52, 0.02),  
-    new THREE.Vector3(-0.45, -0.34, 0.06),  
-    new THREE.Vector3(-0.42, -0.20, 0.09),  
-    new THREE.Vector3(-0.36, -0.10, 0.08),  
-    new THREE.Vector3(-0.32, -0.02, 0.05)  
+    new THREE.Vector3(-0.155, -0.55, 0.00),  
+    new THREE.Vector3(-0.18, -0.60, 0.06),  
+    new THREE.Vector3(-0.14, -0.65, 0.13),  
+    new THREE.Vector3(-0.05, -0.68, 0.17)  
   ]);  
   const uclGeo = new THREE.TubeGeometry(uclCurve, 20, 0.032, 8, false);  
   const ucl = new THREE.Mesh(uclGeo, ligMat);  
   group.add(ucl);  
   
   const rclCurve = new THREE.CatmullRomCurve3([  
-    new THREE.Vector3(0.42, -0.50, 0.02),  
-    new THREE.Vector3(0.45, -0.32, 0.06),  
-    new THREE.Vector3(0.42, -0.18, 0.09),  
-    new THREE.Vector3(0.36, -0.08, 0.08),  
-    new THREE.Vector3(0.32, 0.00, 0.05)  
+    new THREE.Vector3(0.38, -0.55, 0.00),  
+    new THREE.Vector3(0.40, -0.62, 0.03),  
+    new THREE.Vector3(0.38, -0.68, 0.06),  
+    new THREE.Vector3(0.35, -0.72, 0.06)  
   ]);  
   const rclGeo = new THREE.TubeGeometry(rclCurve, 20, 0.028, 8, false);  
   const rcl = new THREE.Mesh(rclGeo, ligMat);  
@@ -1515,7 +1672,20 @@ function buildHinge(){
     rcl.scale.y = 1 + tension * 0.10;  
   }  
   
-  return {scene, camera, renderer, controls, anim};  
+  const inspectables = [
+    {mesh: humerusBody, label:'Humerus', desc:'Upper arm bone. Its lower end forms the elbow joint with the ulna and radius.'},
+    {mesh: ulnaShaft, label:'Ulna', desc:'Forearm bone on the little-finger side. Forms the main hinge of the elbow.'},
+    {mesh: radShaft, label:'Radius', desc:'Forearm bone on the thumb side. Rotates alongside the ulna during forearm movement.'},
+    {mesh: trochCart, label:'Articular Cartilage', desc:'Smooth tissue covering bone ends. Reduces friction and cushions the joint during movement.'},
+    {mesh: capCart, label:'Articular Cartilage', desc:'Smooth tissue covering bone ends. Reduces friction and cushions the joint during movement.'},
+    {mesh: notchCart, label:'Articular Cartilage', desc:'Smooth tissue covering bone ends. Reduces friction and cushions the joint during movement.'},
+    {mesh: radHeadCart, label:'Articular Cartilage', desc:'Smooth tissue covering bone ends. Reduces friction and cushions the joint during movement.'},
+    {mesh: olecranonCart, label:'Articular Cartilage', desc:'Smooth tissue covering bone ends. Reduces friction and cushions the joint during movement.'},
+    {mesh: ucl, label:'Ligament', desc:'Tough fibrous tissue connecting bone to bone. Stabilizes the joint and limits excess movement.'},
+    {mesh: rcl, label:'Ligament', desc:'Tough fibrous tissue connecting bone to bone. Stabilizes the joint and limits excess movement.'},
+    {mesh: annularLig, label:'Ligament', desc:'Tough fibrous tissue connecting bone to bone. Stabilizes the joint and limits excess movement.'}
+  ];
+  return {scene, camera, renderer, controls, anim, inspectables};  
 }  
 /* ─── 6. PIVOT — Atlas–Axis (C1–C2) ─── */  
 function buildPivot(){  
@@ -1816,7 +1986,17 @@ function buildPivot(){
     c1Group.position.x = Math.sin(t * 0.6) * 0.015;  
   }  
   
-  return {scene, camera, renderer, controls, anim};  
+  // Inspect Mode metadata (additive only -- does not affect rendering,
+  // scene hierarchy, or animation). References the actual mesh objects
+  // already created above, so highlighting is always exactly correct.
+  const inspectables = [
+    {mesh: antArch, label:'Atlas (C1)', desc:'The topmost neck vertebra. Ring-shaped, it supports the skull and rotates around the axis below it.'},
+    {mesh: postArch, label:'Atlas (C1)', desc:'The topmost neck vertebra. Ring-shaped, it supports the skull and rotates around the axis below it.'},
+    {mesh: c2Body, label:'Axis (C2)', desc:'The second neck vertebra. Its upward peg (the dens) lets the atlas -- and the skull -- rotate side to side.'},
+    {mesh: dens, label:'Axis (C2)', desc:'The odontoid process (dens). This peg of bone is what the atlas actually pivots around.'},
+    {mesh: transverseLigament, label:'Transverse Ligament', desc:'Holds the dens firmly against the atlas, keeping rotation safe and controlled.'}
+  ];
+  return {scene, camera, renderer, controls, anim, inspectables};  
 }  
   
 /* ─── DATA & ROUTING ─── */  
@@ -1828,6 +2008,222 @@ const BUILDERS = {
   hinge: buildHinge,  
   pivot: buildPivot  
 };  
+
+/* ═══════════════════════════════════════════════════════════════
+   INSPECT MODE — isolated, additive module.
+
+   Does not modify show(), loop(), disposeCurrent(), OrbitControls,
+   the camera system, or scene hierarchy. It works entirely by:
+     1. Wrapping each BUILDERS[key] once, at load time, so a scene's
+        returned anim() is pause-aware and its `inspectables` list
+        (added to 4 of the 6 builders -- see their return statements)
+        is captured for raycasting.
+     2. Adding one click listener to the shared canvas that only
+        acts when Inspect Mode is on.
+   Everything else in the simulator runs exactly as it did before.
+   ═══════════════════════════════════════════════════════════════ */
+(function setupInspectMode(){
+
+  let inspectModeActive = false;
+
+  // --- Pause/resume without touching the render loop ---
+  // Freezes the animation's time input the instant Inspect Mode turns
+  // on (so the joint holds exactly its current pose), and on resume,
+  // shifts all future time values back by the paused duration so the
+  // animation continues smoothly from that same pose rather than
+  // jumping forward to "catch up" to real elapsed time.
+  let pauseStartRawT = null;
+  let totalPausedDuration = 0;
+
+  function wrapAnim(originalAnimFn){
+    if (typeof originalAnimFn !== 'function') return originalAnimFn;
+    return function(rawT){
+      if (inspectModeActive){
+        if (pauseStartRawT === null) pauseStartRawT = rawT;
+        originalAnimFn(pauseStartRawT - totalPausedDuration);
+      } else {
+        if (pauseStartRawT !== null){
+          totalPausedDuration += (rawT - pauseStartRawT);
+          pauseStartRawT = null;
+        }
+        originalAnimFn(rawT - totalPausedDuration);
+      }
+    };
+  }
+
+  // --- Highlight state (single selection, shared materials preserved) ---
+  // Many meshes in this simulator share ONE material instance across
+  // several objects (e.g. every bone-colored mesh in a joint). Setting
+  // emissive directly on mesh.material would highlight every mesh
+  // sharing that instance, not just the tapped one -- so instead we
+  // swap in a per-mesh clone for the highlight and restore the
+  // original shared reference (never mutated) when deselecting.
+  let selectedMesh = null;
+  let selectedOriginalMaterial = null;
+
+  function clearHighlight(){
+    if (selectedMesh && selectedOriginalMaterial){
+      const highlightClone = selectedMesh.material;
+      selectedMesh.material = selectedOriginalMaterial;
+      if (highlightClone && highlightClone !== selectedOriginalMaterial) highlightClone.dispose();
+    }
+    selectedMesh = null;
+    selectedOriginalMaterial = null;
+  }
+
+  function highlightMesh(mesh){
+    if (mesh === selectedMesh) return; // already selected, nothing to do
+    clearHighlight();
+    selectedOriginalMaterial = mesh.material;
+    const clone = mesh.material.clone();
+    clone.emissive = new THREE.Color(0xe8c468);
+    clone.emissiveIntensity = 0.5;
+    mesh.material = clone;
+    selectedMesh = mesh;
+  }
+
+  // --- Info card (bottom sheet, anchored to the 3D viewport) ---
+  function showInfoCard(label, desc){
+    const card = document.getElementById('inspectCard');
+    const titleEl = document.getElementById('inspectCardTitle');
+    const descEl = document.getElementById('inspectCardDesc');
+    if (!card || !titleEl || !descEl) return;
+    titleEl.textContent = label;
+    descEl.textContent = desc;
+    card.classList.add('visible');
+  }
+  function hideInfoCard(){
+    const card = document.getElementById('inspectCard');
+    if (card) card.classList.remove('visible');
+  }
+
+  // --- Raycasting ---
+  // Reused across every click rather than recreated each time, and
+  // raycasting only runs against the current joint's known inspectable
+  // meshes (not the whole scene graph), which is both more accurate
+  // and cheaper than a full-scene raycast plus fuzzy matching.
+  const raycaster = new THREE.Raycaster();
+  const pointerNDC = new THREE.Vector2();
+  let currentInspectables = [];
+
+  function performInspectHitTest(clientX, clientY){
+    if (!inspectModeActive || !currentRenderer || !currentCamera || !currentScene) return;
+    if (!currentInspectables.length) return;
+    const rect = currentRenderer.domElement.getBoundingClientRect();
+    pointerNDC.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+    pointerNDC.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(pointerNDC, currentCamera);
+    // Raycast the WHOLE scene (not just the labeled meshes) so unlabeled
+    // geometry still correctly occludes what's behind it -- otherwise a
+    // click that visually lands on something unlabeled (a hand bone, the
+    // capsule, the scapula) is invisible to hit-testing and "sees
+    // through" to whatever labeled structure happens to be further
+    // along the same ray, mislabeling what the user actually tapped.
+    const hits = raycaster.intersectObjects(currentScene.children, true);
+    if (hits.length){
+      const hitMesh = hits[0].object;
+      const entry = currentInspectables.find(item => item.mesh === hitMesh);
+      if (entry){
+        highlightMesh(hitMesh);
+        showInfoCard(entry.label, entry.desc);
+      } else {
+        clearHighlight();
+        hideInfoCard();
+      }
+    } else {
+      clearHighlight();
+      hideInfoCard();
+    }
+  }
+
+  let lastTouchHandledTime = 0;
+  function handleCanvasClick(e){
+    // Skip if a touch tap just handled this same interaction -- mobile
+    // browsers synthesize a 'click' after a tap, and without this guard
+    // that synthetic click would redundantly re-run the same hit test a
+    // moment after handleTouchEnd already did.
+    if (Date.now() - lastTouchHandledTime < 500) return;
+    performInspectHitTest(e.clientX, e.clientY);
+  }
+
+  // --- Touch support ---
+  // 'click' already fires after a tap on most mobile browsers, so the
+  // handler above works on touch devices in the common case. This adds
+  // explicit touch handling as a more robust primary path: it only acts
+  // on a genuine TAP (minimal movement between touchstart and touchend),
+  // so a drag meant for OrbitControls' own rotate/pan can't be
+  // misread as a selection. Listeners are passive and never call
+  // preventDefault, so OrbitControls' own touch handling on the same
+  // canvas is completely unaffected.
+  let touchStartPos = null;
+  const TAP_MOVE_THRESHOLD = 10; // px
+
+  function handleTouchStart(e){
+    if (!inspectModeActive || e.touches.length !== 1){ touchStartPos = null; return; } // ignore multi-touch (pinch/zoom)
+    touchStartPos = {x: e.touches[0].clientX, y: e.touches[0].clientY};
+  }
+  function handleTouchEnd(e){
+    if (!inspectModeActive || !touchStartPos) return;
+    const touch = e.changedTouches[0];
+    if (!touch) { touchStartPos = null; return; }
+    const dx = touch.clientX - touchStartPos.x;
+    const dy = touch.clientY - touchStartPos.y;
+    if (Math.sqrt(dx*dx + dy*dy) < TAP_MOVE_THRESHOLD){
+      performInspectHitTest(touch.clientX, touch.clientY);
+      lastTouchHandledTime = Date.now();
+    }
+    touchStartPos = null;
+  }
+
+  // The canvas is created once and shared for the whole session (see
+  // getSharedRenderer), so this listener only needs attaching once --
+  // it checks inspectModeActive itself, so it's harmless when off.
+  //
+  // Takes the renderer as a parameter rather than reading the global
+  // currentRenderer: at the moment this runs (inside the builder
+  // wrapper below), show() hasn't assigned currentRenderer yet -- that
+  // happens only after builder() returns. Reading the global here would
+  // silently fail to attach on the very first joint shown each session
+  // (found via testing, not by inspection -- currentRenderer is null
+  // on that first call).
+  let clickListenerAttached = false;
+  function ensureClickListenerAttached(renderer){
+    if (clickListenerAttached || !renderer) return;
+    renderer.domElement.addEventListener('click', handleCanvasClick);
+    renderer.domElement.addEventListener('touchstart', handleTouchStart, {passive:true});
+    renderer.domElement.addEventListener('touchend', handleTouchEnd, {passive:true});
+    clickListenerAttached = true;
+  }
+
+  // --- Wrap every builder once, at load time ---
+  Object.keys(BUILDERS).forEach(function(key){
+    const originalBuilder = BUILDERS[key];
+    BUILDERS[key] = function(){
+      const sceneData = originalBuilder();
+      if (sceneData && sceneData.anim) sceneData.anim = wrapAnim(sceneData.anim);
+      // A new joint means the previous selection's mesh no longer
+      // belongs to the live scene -- drop it rather than let it dangle.
+      clearHighlight();
+      hideInfoCard();
+      currentInspectables = (sceneData && sceneData.inspectables) || [];
+      if (sceneData) ensureClickListenerAttached(sceneData.renderer);
+      return sceneData;
+    };
+  });
+
+  // --- Toggle button ---
+  window.toggleInspectMode = function(){
+    inspectModeActive = !inspectModeActive;
+    const btn = document.getElementById('inspectToggle');
+    if (btn) btn.classList.toggle('active', inspectModeActive);
+    if (!inspectModeActive){
+      clearHighlight();
+      hideInfoCard();
+    }
+  };
+
+})();
+
   
 const DATA={  
   fixed:{  
