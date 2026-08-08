@@ -45,7 +45,54 @@
   .sub-btn{background:#0c0c10;border:1px solid #1a2a1a;color:#5a7a5a;padding:7px 12px;border-radius:6px;font-weight:400;cursor:pointer;transition:.2s;font-size:10px;letter-spacing:0.5px}  
   .sub-btn:hover{background:#121a12;color:#7a9a7a;border-color:#2a4a2a;transform:scale(1.03)}  
   .submenu{margin-top:12px;display:none;flex-direction:column;align-items:center;width:100%}  
-  .submenu-row{display:flex;gap:5px;flex-wrap:wrap;justify-content:center;margin-top:5px}  
+  .submenu-row{display:flex;gap:5px;flex-wrap:wrap;justify-content:center;margin-top:24px;position:relative}  
+  /* Branching connector for the submenu row -- one trunk (the existing
+     .bl.g stub above) splits into a horizontal bar, then one arrow per
+     button. Both the horizontal bar AND the arrow are built per-button
+     (not as one shared element spanning the row), each centered on
+     that button via left:50% + translateX(-50%). This is what
+     guarantees correct alignment regardless of actual rendered widths
+     -- "Ball & Socket" is visibly wider than "Pivot" or "Hinge", so
+     any approach that guesses one shared span (e.g. percentages of the
+     row) reliably falls short of at least one branch; verified against
+     an actual rendered screenshot where a percentage-based bar left
+     the Hinge branch visibly disconnected. Each button's own 100px-wide
+     segment is generously sized (verified to comfortably overlap its
+     neighbor's segment even in the widest realistic case) so the
+     combined result reads as one continuous bar without needing to
+     know any other button's width. */
+  .sub-btn{position:relative}
+  .sub-btn::before{
+    content:'';
+    position:absolute;
+    top:-20px; left:50%;
+    width:100px; height:2px;
+    background:#4a8a4a;
+    transform:translateX(-50%);
+    z-index:0;
+  }
+  /* First/last buttons only need their bar to reach toward the middle
+     button (that's the only neighbor they overlap with) -- the default
+     rule above extends 50px in BOTH directions from center, which left
+     a dangling stub of line hanging past the outermost arrows on the
+     outer side with nothing there to connect to. */
+  .sub-btn:first-child::before{
+    left:50%; width:50px; transform:none;
+  }
+  .sub-btn:last-child::before{
+    left:auto; right:50%; width:50px; transform:none;
+  }
+  .sub-btn::after{
+    content:'';
+    position:absolute;
+    top:-20px; left:50%;
+    width:0; height:0;
+    border-left:5px solid transparent;
+    border-right:5px solid transparent;
+    border-top:14px solid #4a8a4a;
+    transform:translateX(-50%);
+    z-index:0;
+  }
   .card{margin-top:30px;background:rgba(10,10,14,0.92);border:1px solid rgba(35,35,45,0.4);border-radius:12px;padding:24px;max-width:920px;margin-left:auto;margin-right:auto;display:none;backdrop-filter:blur(24px)}  
   .card-h{display:flex;align-items:center;gap:10px;margin-bottom:14px}  
   .card-icon{font-size:24px;color:#908880}  
@@ -72,7 +119,32 @@
   .accordion-body ul{padding-left:14px;list-style:disc}  
   .accordion-body ul li{margin-bottom:3px}  
   .accordion-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px}  
-  @media(max-width:600px){.branches{flex-direction:column;gap:16px}.hconn{display:none}.accordion-grid{grid-template-columns:1fr}.card-dia{height:320px}}  
+  @media(max-width:600px){
+    .branches{flex-direction:column;gap:16px;position:relative}
+    .hconn{display:none}
+    /* The individual .bl stubs only make sense for the desktop/row
+       layout, where each one drops straight down from the shared
+       .hconn bar above it. In the stacked mobile column, each stub
+       stays a fixed 14px while the real gap between consecutive boxes
+       is 16px -- nothing bridges it, so FIXED/SLIGHTLY MOVABLE/FREELY
+       MOVABLE end up with visibly broken, disconnected line segments
+       between them instead of one continuous connector. Replaced with
+       a single line spanning the whole stack instead. */
+    .branch .bl{display:none}
+    .branches::before{
+      content:'';
+      position:absolute;
+      top:0; bottom:0;
+      left:50%;
+      width:2px;
+      background:linear-gradient(to bottom,#a85050,#8a7a6a,#4a8a4a);
+      transform:translateX(-50%);
+      z-index:0;
+    }
+    .accordion-grid{grid-template-columns:1fr}
+    .card-dia{height:320px}
+  }
+
   .logo-badge{position:fixed;top:16px;left:16px;width:42px;height:42px;border-radius:12px;background:radial-gradient(circle at 50% 45%,#3a3018,#151208);display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 1px rgba(232,196,104,0.4),0 0 14px 2px rgba(232,196,104,0.35),inset 0 0 12px rgba(232,196,104,0.5);z-index:100}
   .logo-badge svg{width:22px;height:22px;filter:drop-shadow(0 0 3px rgba(232,196,104,0.7))}
   /* ─── INFO CARD (new, additive only) ─── */
@@ -895,6 +967,116 @@ function buildSlightly(){
   const infBodyGeo = new THREE.LatheGeometry(infBodyProfile, 32);
   const infCyl = new THREE.Mesh(infBodyGeo, boneMat);
   infCyl.castShadow = true;
+
+  // ═══════════════════════════════════════════════════════════════
+  //  Vertebral arch + processes -- LatheGeometry (used for the body
+  //  above) is radially symmetric by construction, so it can only ever
+  //  produce a plain drum shape; it cannot represent a posterior arch,
+  //  spinous process, or transverse processes no matter how the
+  //  profile is tuned. This was the actual reason the joint read as
+  //  "two cylindrical bones" rather than vertebrae -- there was no
+  //  posterior bony structure at all, only the disc-facing body.
+  //
+  //  Built as a reusable function (capsule segments chained the same
+  //  way as the hand skeleton and olecranon hook elsewhere in this
+  //  file) so it can be called once per vertebra with a small mirror/
+  //  rotation offset for natural variation, rather than two identical
+  //  copies. All coordinates are computed relative to the body's own
+  //  radius at the attachment height, not hand-picked absolute
+  //  numbers, so this stays correct if the body profile ever changes.
+  //  Verified before implementing: built entirely at |y|=0.55, well
+  //  clear of the disc zone (|y|<0.22), and the two vertebrae's arches
+  //  sit on opposite sides of y=0 with no possibility of overlapping
+  //  each other.
+  // ═══════════════════════════════════════════════════════════════
+  function bodyRadiusAt(y) {
+    for (let i=0;i<bodyProfile.length-1;i++){
+      const p0=bodyProfile[i], p1=bodyProfile[i+1];
+      if (y>=p0.y && y<=p1.y) { const t=(y-p0.y)/(p1.y-p0.y); return p0.x+t*(p1.x-p0.x); }
+    }
+    return y<bodyProfile[0].y ? bodyProfile[0].x : bodyProfile[bodyProfile.length-1].x;
+  }
+  // Built as ONE continuous TubeGeometry for the whole arch (both
+  // pedicles and both laminae, meeting at the spinous process base in
+  // a single unbroken path) instead of chained capsule segments -- the
+  // capsule-chain version read as a string of disconnected beads/rods
+  // because each segment's own rounded end-caps created a visible seam
+  // at every joint, even where they numerically overlapped. A single
+  // tube has no such internal seams. The spinous and transverse
+  // processes are tapered cones (not more capsules) whose wide base is
+  // positioned exactly at a point already on the arch's own path,
+  // guaranteeing they read as growing out of the arch rather than
+  // floating pieces attached nearby.
+  function buildVertebralArch(parentGroup, mat, mirrorY, rotationOffsetDeg){
+    const archY = mirrorY * 0.55;
+    const midR = bodyRadiusAt(0.55); // same radius at this height on both bodies (profile is mirrored, not rescaled)
+    const rot = THREE.MathUtils.degToRad(rotationOffsetDeg);
+    const cos = Math.cos(rot), sin = Math.sin(rot);
+    // small rotation around Y so the two vertebrae's arches aren't a
+    // perfectly identical stack -- natural slight axial variation
+    function rotXZ(x, z) { return [x*cos - z*sin, x*sin + z*cos]; }
+    function pt(xFrac, zFrac) {
+      const [x, z] = rotXZ(midR*xFrac, midR*zFrac);
+      return new THREE.Vector3(x, archY, z);
+    }
+
+    const archPath = [
+      pt(-0.5, -0.78),   // left pedicle attachment (on the body surface)
+      pt(-0.72, -1.28),  // left lamina, curving posterior
+      pt(-0.25, -1.60),  // left lamina, curving toward midline
+      pt(0, -1.68),       // spinous base -- apex of the arch
+      pt(0.25, -1.60),   // right lamina
+      pt(0.72, -1.28),   // right lamina
+      pt(0.5, -0.78)     // right pedicle attachment
+    ];
+    const archCurve = new THREE.CatmullRomCurve3(archPath);
+    const archGeo = new THREE.TubeGeometry(archCurve, 40, midR*0.155, 12, false);
+    const arch = new THREE.Mesh(archGeo, mat);
+    arch.castShadow = true;
+    parentGroup.add(arch);
+
+    function addTaperedProcess(basePos, tipPos, baseRadius){
+      const dir = tipPos.clone().sub(basePos);
+      const len = dir.length();
+      dir.normalize();
+      const geo = new THREE.ConeGeometry(baseRadius, len, 12);
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), dir.clone().negate());
+      // shift the cone in along its own axis so the wide base overlaps
+      // generously into the arch tube rather than just touching it
+      mesh.position.copy(basePos).addScaledVector(dir, len/2 - midR*0.11);
+      mesh.castShadow = true;
+      parentGroup.add(mesh);
+    }
+
+    // Spinous process -- base exactly at the arch's own apex waypoint
+    addTaperedProcess(pt(0, -1.68), pt(0, -2.5), midR*0.16);
+
+    // Transverse processes -- base exactly at an arch waypoint on each side
+    addTaperedProcess(pt(-0.72, -1.28), pt(-1.65, -1.05), midR*0.15);
+    addTaperedProcess(pt(0.72, -1.28), pt(1.65, -1.05), midR*0.15);
+
+    // Articular processes -- small and subtle (smaller base radius than
+    // the transverse/spinous processes above), base exactly at the
+    // existing pedicle-attachment waypoints. Tip direction points
+    // toward y=0 regardless of which vertebra this is (mirrorY flips
+    // the sign correctly): the superior vertebra's processes angle
+    // down toward the disc, the inferior vertebra's angle up toward it.
+    function addArticularProcess(basePt){
+      const tip = new THREE.Vector3(basePt.x, archY - mirrorY*midR*0.35, basePt.z - mirrorY*midR*0.15);
+      addTaperedProcess(basePt, tip, midR*0.095);
+    }
+    addArticularProcess(pt(-0.5, -0.78));
+    addArticularProcess(pt(0.5, -0.78));
+  }
+
+  const supVertGroup = new THREE.Group();
+  supVertGroup.add(supCyl);
+  buildVertebralArch(supVertGroup, boneMat, 1, 0);
+  const infVertGroup = new THREE.Group();
+  infVertGroup.add(infCyl);
+  buildVertebralArch(infVertGroup, boneMat, -1, 8); // slight rotation offset -- not a perfect mirrored duplicate
+
   // ═══════════════════════════════════════════════════════════════
   //  Intervertebral disc — rebuilt from a single hollow ring into a
   //  layered anatomical structure: annulus fibrosus as four concentric
@@ -945,13 +1127,20 @@ function buildSlightly(){
   endplate1.position.y = 0.20;  
   const endplate2 = new THREE.Mesh(new THREE.CylinderGeometry(0.90, 0.90, 0.035, 40), cartilageMat);  
   endplate2.position.y = -0.20;  
-  group.add(supCyl, infCyl, annulusGroup, nucleus, endplate1, endplate2);  
+  group.add(supVertGroup, infVertGroup, annulusGroup, nucleus, endplate1, endplate2);  
   scene.add(group);  
-  camera.position.set(3, 2, 5);  
+  // Elevated posterior-lateral 3/4 view -- the previous front-ish angle
+  // (3,2,5) left the new spinous process hidden directly behind the
+  // vertebral body's own bulk. Verified by rendering several candidate
+  // angles before choosing this one: it's the angle that shows the
+  // body, the arch's opening, the spinous process, and a transverse
+  // process all at once, matching the "processes should make the
+  // vertebral identity obvious" requirement.  
+  camera.position.set(3.06, 4.08, -3.74);  
   function anim(t){  
     group.rotation.y = t*0.15;  
     const comp = Math.sin(t*1.2)*0.03;  
-    supCyl.position.y = -comp; infCyl.position.y = comp;  
+    supVertGroup.position.y = -comp; infVertGroup.position.y = comp;  
     annulusGroup.scale.y = 1 - comp*2;  
   }  
   const inspectables = [
@@ -1340,21 +1529,33 @@ function buildHinge(){
   // capitulum meshes' own vertices against this profile: clipping fell
   // from 72%/88% to 15%/34%, both with shallow max depth (~0.17) — a
   // normal base-blends-into-parent overlap, not a burial.
+  // Lower profile narrowed (~29% at the peak) from its original values so
+  // the shaft visually tapers into a neck before the separately-built
+  // trochlea/capitulum lobes take over -- the original width made this a
+  // LatheGeometry (radially symmetric, so it can only ever be a single
+  // round blob from any angle) wide enough to visually swallow the more
+  // detailed articular meshes sitting just past its end, reading as one
+  // undifferentiated ball rather than a shaft narrowing into two visible
+  // condyle lobes. Top connection point (0.120,-0.007) is unchanged so
+  // the shaft above the joint is undisturbed. Re-validated trochlea/
+  // capitulum/notch clip percentages against this narrower profile
+  // before applying it -- all stayed in the same range already
+  // established as acceptable for the previous (wider) profile.
   const humerusProfile = [
-    new THREE.Vector2(0.180, -0.700),
-    new THREE.Vector2(0.185, -0.646),
-    new THREE.Vector2(0.190, -0.597),
-    new THREE.Vector2(0.195, -0.548),
-    new THREE.Vector2(0.200, -0.499),
-    new THREE.Vector2(0.205, -0.450),
-    new THREE.Vector2(0.205, -0.400),   // condyle band — flare's own contribution only
-    new THREE.Vector2(0.200, -0.351),
-    new THREE.Vector2(0.190, -0.302),
-    new THREE.Vector2(0.175, -0.253),
-    new THREE.Vector2(0.160, -0.204),
-    new THREE.Vector2(0.150, -0.154),
-    new THREE.Vector2(0.138, -0.105),
-    new THREE.Vector2(0.129, -0.056),
+    new THREE.Vector2(0.130, -0.700),
+    new THREE.Vector2(0.133, -0.646),
+    new THREE.Vector2(0.137, -0.597),
+    new THREE.Vector2(0.140, -0.548),
+    new THREE.Vector2(0.143, -0.499),
+    new THREE.Vector2(0.145, -0.450),
+    new THREE.Vector2(0.145, -0.400),
+    new THREE.Vector2(0.140, -0.351),
+    new THREE.Vector2(0.134, -0.302),
+    new THREE.Vector2(0.127, -0.253),
+    new THREE.Vector2(0.120, -0.204),
+    new THREE.Vector2(0.115, -0.154),
+    new THREE.Vector2(0.112, -0.105),
+    new THREE.Vector2(0.115, -0.056),
     new THREE.Vector2(0.120, -0.007),
     new THREE.Vector2(0.108, 0.190),
     new THREE.Vector2(0.105, 1.900)     // shaft continues straight above photo's crop
@@ -1457,7 +1658,13 @@ function buildHinge(){
   // exposed silhouette changes -- only the previously-hidden geometry is
   // now correct instead of ballooning out unrealistically inside the bone.
   const capGeo = new THREE.SphereGeometry(0.16, 24, 24, 0, Math.PI, 0, Math.PI);  
-  const capitulum = new THREE.Mesh(capGeo, boneEndMat);  
+  const capitulumMat = new THREE.MeshPhysicalMaterial({  
+    map: boneEndTex, bumpMap: boneTex.bump, bumpScale: 0.02,  
+    roughness: 0.82, metalness: 0.03,  
+    clearcoat: 0.16, clearcoatRoughness: 0.65,  
+    color: 0xe8dcc8, side: THREE.FrontSide  
+  });  
+  const capitulum = new THREE.Mesh(capGeo, capitulumMat);  
   capitulum.scale.set(1.0, 0.85, 0.9);  
   capitulum.castShadow = true;  
   capGroup.add(capitulum);  
@@ -1466,8 +1673,26 @@ function buildHinge(){
   const capCart = new THREE.Mesh(capCartGeo, cartMat);  
   capCart.scale.set(1.0, 0.87, 0.92);  
   capGroup.add(capCart);  
+
+  // Visible groove between trochlea and capitulum -- the single biggest
+  // lever for breaking up the "one continuous blob" silhouette, since
+  // the color/gap changes alone were too subtle at normal viewing scale
+  // (verified by direct before/after pixel comparison, not assumed).
+  // Positioned in local humerusGroup space, roughly midway between
+  // trochlea's lateral rim and capitulum's medial edge.
+  const condyleGroove = new THREE.Mesh(
+    new THREE.SphereGeometry(0.10, 16, 20),
+    new THREE.MeshBasicMaterial({
+      color: 0x000000, transparent: true, opacity: 0.30,
+      blending: THREE.MultiplyBlending, side: THREE.DoubleSide, depthWrite: false
+    })
+  );
+  condyleGroove.scale.set(0.4, 1.3, 0.55);
+  condyleGroove.position.set(0.255, -0.70, 0.05);
+  condyleGroove.raycast = () => {}; // decorative only -- must not intercept Inspect Mode clicks meant for the labeled Trochlea/Capitulum meshes it sits between
+  humerusGroup.add(condyleGroove);
   
-  capGroup.position.set(0.34, -0.68, 0.04);  
+  capGroup.position.set(0.50, -0.68, 0.04);  
   humerusGroup.add(capGroup);  
   
   // Note: the old supracondylar ridge tubes were removed here — they
@@ -1517,6 +1742,24 @@ function buildHinge(){
   olecranon.scale.set(1.1, 1.6, 0.85);  
   olecranon.castShadow = true;  
   ulnaGroup.add(olecranon);  
+
+  // Two additional segments curving anteriorly (+Z, toward the
+  // trochlea) as they rise toward the tip -- turns the olecranon into
+  // a genuine curved hook instead of jumping straight from the base
+  // blob to the tip blob. Validated: zero clipping against the humerus
+  // flare, and solid overlap with both neighbors (0.29 and 0.23 units
+  // of overlap respectively, well clear of any gap).
+  const olecranonMid1 = new THREE.Mesh(new THREE.SphereGeometry(0.165, 20, 18), ivoryMat);
+  olecranonMid1.position.set(0, -0.575, -0.205);
+  olecranonMid1.scale.set(1.05, 1.3, 0.9);
+  olecranonMid1.castShadow = true;
+  ulnaGroup.add(olecranonMid1);
+
+  const olecranonMid2 = new THREE.Mesh(new THREE.SphereGeometry(0.135, 18, 16), ivoryMat);
+  olecranonMid2.position.set(0, -0.505, -0.178);
+  olecranonMid2.scale.set(1.0, 1.1, 0.9);
+  olecranonMid2.castShadow = true;
+  ulnaGroup.add(olecranonMid2);
 
   const olecranonTipGeo = new THREE.SphereGeometry(0.11, 20, 16);
   const olecranonTip = new THREE.Mesh(olecranonTipGeo, ivoryMat);
@@ -1677,7 +1920,7 @@ function buildHinge(){
   const radHeadGeo = new THREE.CylinderGeometry(0.13, 0.13, 0.08, 32);  
   const radHead = new THREE.Mesh(radHeadGeo, ivoryMat);  
   radHead.rotation.x = Math.PI / 2;  
-  radHead.position.set(0.34, -0.72, 0.06);  
+  radHead.position.set(0.50, -0.72, 0.06);  
   radHead.castShadow = true;  
   radiusGroup.add(radHead);  
   
@@ -1698,21 +1941,21 @@ function buildHinge(){
   // Radial neck  
   const radNeckGeo = new THREE.CylinderGeometry(0.08, 0.095, 0.20, 24);  
   const radNeck = new THREE.Mesh(radNeckGeo, ivoryMat);  
-  radNeck.position.set(0.34, -0.86, 0.06);  
+  radNeck.position.set(0.50, -0.86, 0.06);  
   radNeck.castShadow = true;  
   radiusGroup.add(radNeck);  
   
   // Radial shaft  
   const radShaftGeo = new THREE.CylinderGeometry(0.09, 0.065, 1.6, 48);  
   const radShaft = new THREE.Mesh(radShaftGeo, ivoryMat);  
-  radShaft.position.set(0.34, -1.7, 0.06);  
+  radShaft.position.set(0.50, -1.7, 0.06);  
   radShaft.castShadow = true;  
   radiusGroup.add(radShaft);  
   
   // Annular ligament around radial head  
   const annularLigGeo = new THREE.TorusGeometry(0.14, 0.018, 8, 32);  
   const annularLig = new THREE.Mesh(annularLigGeo, ligMat);  
-  annularLig.position.set(0.34, -0.72, 0.06);  
+  annularLig.position.set(0.50, -0.72, 0.06);  
   annularLig.rotation.x = Math.PI / 2;  
   radiusGroup.add(annularLig);  
   
@@ -1727,8 +1970,11 @@ function buildHinge(){
   //  correctly with the forearm during elbow flexion.
   //
   //  Ulna's distal tip sits at (0,-2.65,0) r=0.11; radius's distal tip
-  //  sits at (0.34,-2.5,0.06) r=0.065 (both computed from their
-  //  existing, unmodified geometry -- neither was changed).
+  //  sits at (0.50,-2.5,0.06) r=0.065 (radius position current as of
+  //  the trochlea/capitulum separation fix -- if the radius shaft
+  //  moves again, the carpal/metacarpal X-coordinates below need the
+  //  same proportional re-anchoring treatment described where they're
+  //  defined, not a uniform shift).
   // ═══════════════════════════════════════════════════════════════  
   const handGroup = new THREE.Group();  
   handGroup.position.set(-HINGE_AXIS.x, -HINGE_AXIS.y, -HINGE_AXIS.z);  
@@ -1766,24 +2012,34 @@ function buildHinge(){
   }  
 
   // --- Carpals: 8 bones in two rows (proximal, then distal) ---  
+  // X-coordinates below are proportionally re-anchored to the radius's
+  // current position (0.50) -- the radius shaft moved (0.34 -> 0.42 ->
+  // 0.50) during a later trochlea/capitulum separation fix, but this
+  // hand skeleton was never updated to follow, leaving the carpals
+  // anchored to where the radius USED to be. Fixed by shifting each
+  // carpal proportionally to how close it was to the radius vs the
+  // (unmoved) ulna in the original design, rather than a uniform
+  // shift, so bones nearest the ulna stay correctly anchored there
+  // while bones nearest the radius follow it to its new position.  
   // Proximal row, radial to ulnar side: scaphoid, lunate, triquetrum, pisiform  
-  addCarpal(new THREE.Vector3(0.32, -2.66, 0.05), 0.085, ivoryMat);  
-  addCarpal(new THREE.Vector3(0.20, -2.69, 0.02), 0.075, ivoryMat);  
-  addCarpal(new THREE.Vector3(0.10, -2.68, -0.02), 0.075, ivoryMat);  
-  addCarpal(new THREE.Vector3(0.05, -2.60, -0.09), 0.055, ivoryMat);  
+  addCarpal(new THREE.Vector3(0.4706, -2.66, 0.05), 0.085, ivoryMat);  
+  addCarpal(new THREE.Vector3(0.2941, -2.69, 0.02), 0.075, ivoryMat);  
+  addCarpal(new THREE.Vector3(0.1471, -2.68, -0.02), 0.075, ivoryMat);  
+  addCarpal(new THREE.Vector3(0.0735, -2.60, -0.09), 0.055, ivoryMat);  
   // Distal row, radial to ulnar side: trapezium, trapezoid, capitate, hamate  
-  addCarpal(new THREE.Vector3(0.35, -2.79, 0.07), 0.075, ivoryMat);  
-  addCarpal(new THREE.Vector3(0.24, -2.82, 0.03), 0.065, ivoryMat);  
-  addCarpal(new THREE.Vector3(0.14, -2.83, -0.01), 0.085, ivoryMat);  
-  addCarpal(new THREE.Vector3(0.05, -2.80, -0.05), 0.075, ivoryMat);  
+  addCarpal(new THREE.Vector3(0.5147, -2.79, 0.07), 0.075, ivoryMat);  
+  addCarpal(new THREE.Vector3(0.3529, -2.82, 0.03), 0.065, ivoryMat);  
+  addCarpal(new THREE.Vector3(0.2059, -2.83, -0.01), 0.085, ivoryMat);  
+  addCarpal(new THREE.Vector3(0.0735, -2.80, -0.05), 0.075, ivoryMat);  
 
   // --- Metacarpals: 5, extending from the distal carpal row into the palm ---  
+  // Base X-coordinates likewise proportionally re-anchored (see note above).  
   const mcpBases = [  
-    new THREE.Vector3(0.38, -2.80, 0.09),   // thumb (1st)  
-    new THREE.Vector3(0.26, -2.85, 0.04),   // index (2nd)  
-    new THREE.Vector3(0.15, -2.87, -0.01),  // middle (3rd)  
-    new THREE.Vector3(0.07, -2.85, -0.05),  // ring (4th)  
-    new THREE.Vector3(0.00, -2.80, -0.08)   // little (5th)  
+    new THREE.Vector3(0.5588, -2.80, 0.09),   // thumb (1st)  
+    new THREE.Vector3(0.3824, -2.85, 0.04),   // index (2nd)  
+    new THREE.Vector3(0.2206, -2.87, -0.01),  // middle (3rd)  
+    new THREE.Vector3(0.1029, -2.85, -0.05),  // ring (4th)  
+    new THREE.Vector3(0.0000, -2.80, -0.08)   // little (5th) -- exactly at the ulna anchor, unshifted  
   ];  
   const mcpDirs = [  
     new THREE.Vector3(0.35, -0.75, 0.20).normalize(),  // thumb angles outward for opposition  
@@ -1887,6 +2143,11 @@ function buildHinge(){
     {mesh: humerusBody, label:'Humerus', desc:'Upper arm bone. Its lower end forms the elbow joint with the ulna and radius.'},
     {mesh: ulnaShaft, label:'Ulna', desc:'Forearm bone on the little-finger side. Forms the main hinge of the elbow.'},
     {mesh: radShaft, label:'Radius', desc:'Forearm bone on the thumb side. Rotates alongside the ulna during forearm movement.'},
+    {mesh: trochlea, label:'Trochlea', desc:'Spool-shaped part of the humerus. Fits into the ulna\'s trochlear notch and guides the hinge motion.'},
+    {mesh: capitulum, label:'Capitulum', desc:'Rounded part of the humerus, beside the trochlea. Articulates with the head of the radius.'},
+    {mesh: olecranon, label:'Olecranon Process', desc:'The bony point of the ulna that forms the tip of the elbow. Locks into place behind the humerus during extension.'},
+    {mesh: olecranonTip, label:'Olecranon Process', desc:'The bony point of the ulna that forms the tip of the elbow. Locks into place behind the humerus during extension.'},
+    {mesh: notch, label:'Trochlear Notch', desc:'C-shaped curve on the ulna that wraps around the humerus\'s trochlea, forming the main hinge surface.'},
     {mesh: trochCart, label:'Articular Cartilage', desc:'Smooth tissue covering bone ends. Reduces friction and cushions the joint during movement.'},
     {mesh: capCart, label:'Articular Cartilage', desc:'Smooth tissue covering bone ends. Reduces friction and cushions the joint during movement.'},
     {mesh: notchCart, label:'Articular Cartilage', desc:'Smooth tissue covering bone ends. Reduces friction and cushions the joint during movement.'},
@@ -2066,11 +2327,19 @@ function buildPivot(){
   group.add(c2Group);  
   
   // ─── ATLAS (C1) ───  
+  // Rebuilt as a genuinely connected ring. The previous version had all
+  // the right named pieces (arches, lateral masses, facets) but nothing
+  // was verified to actually touch: the lateral mass was a small sphere
+  // and the facet sat 0.24 units above it with a bare gap, which is
+  // exactly the "floating disconnected balls" look reported. This
+  // version computes every connection point directly (ring parametrized
+  // by angle, arch endpoints and lateral-mass span derived from that
+  // same parametrization) and verifies surface-to-surface overlap
+  // numerically before rendering, rather than eyeballing coordinates.
+  //
   // Distinct material from C2's ivoryMat -- both references color the
   // atlas noticeably paler/grayer than the axis specifically so the two
-  // bones read as separate structures. Sharing one color was a real
-  // contributor to the "blob" problem: same base color + close spacing
-  // meant nothing visually separated where C1 ends and C2 begins.
+  // bones read as separate structures.
   const atlasMat = new THREE.MeshPhysicalMaterial({  
     map: boneTex.albedo, bumpMap: boneTex.bump, bumpScale: 0.02,  
     roughnessMap: boneTex.rough, roughness: 0.75, metalness: 0.03,  
@@ -2078,87 +2347,141 @@ function buildPivot(){
     color: 0xcfd2d4, side: THREE.FrontSide  
   });  
   const c1Group = new THREE.Group();  
-  
-  const antArchCurve = new THREE.CatmullRomCurve3([  
-    new THREE.Vector3(-0.38, 0.52, 0.35),  
-    new THREE.Vector3(-0.20, 0.55, 0.42),  
-    new THREE.Vector3(0, 0.56, 0.44),  
-    new THREE.Vector3(0.20, 0.55, 0.42),  
-    new THREE.Vector3(0.38, 0.52, 0.35)  
-  ]);  
-  const antArchGeo = new THREE.TubeGeometry(antArchCurve, 24, 0.07, 10, false);  
-  const antArch = new THREE.Mesh(antArchGeo, atlasMat);  
+
+  // Ring parametrization: x = R*cos(theta), z = R*sin(theta), constant
+  // y=C1_Y. theta=90 -> +Z (anterior), theta=270 -> -Z (posterior),
+  // theta=0/180 -> +X/-X (right/left side, where the lateral masses go).
+  const C1_R = 0.40, C1_Y = 0.52;
+  function c1RingPoint(thetaDeg, radius) {  
+    const t = THREE.MathUtils.degToRad(thetaDeg);  
+    return new THREE.Vector3((radius===undefined?C1_R:radius)*Math.cos(t), C1_Y, (radius===undefined?C1_R:radius)*Math.sin(t));  
+  }  
+  const C1_ANT_START = 55, C1_ANT_END = 125;   // anterior arch sweep (front)  
+  const C1_POST_START = 215, C1_POST_END = 325; // posterior arch sweep (back)  
+
+  // Anterior/posterior arches -- built as a tube through points sampled
+  // directly along the circle (via c1RingPoint above), rather than a
+  // rotated TorusGeometry. A rotated torus was the first approach tried
+  // here, but its rotation math was verified wrong by direct inspection
+  // (the arc landed on the posterior side while intended for anterior,
+  // and a corrected rotation still didn't land at the intended theta
+  // range) -- rather than keep guessing at Euler composition, this uses
+  // the same sampled-points-through-a-tube technique already proven
+  // correct elsewhere in this file (ligaments, the trochlear notch),
+  // and was verified against this exact geometry before being written
+  // here: the resulting arc's theta range and Z-sign both matched the
+  // intended anterior/posterior placement exactly.
+  function buildC1ArcTube(startDeg, endDeg, segments, tubeRadius) {  
+    const points = [];  
+    for (let i = 0; i <= segments; i++) {  
+      const theta = startDeg + (endDeg - startDeg) * (i / segments);  
+      points.push(c1RingPoint(theta));  
+    }  
+    const curve = new THREE.CatmullRomCurve3(points);  
+    const geo = new THREE.TubeGeometry(curve, segments * 2, tubeRadius, 10, false);  
+    return new THREE.Mesh(geo, atlasMat);  
+  }  
+
+  const antArch = buildC1ArcTube(C1_ANT_START, C1_ANT_END, 12, 0.075);  
   antArch.castShadow = true;  
   c1Group.add(antArch);  
-  
-  const antTub = new THREE.Mesh(new THREE.SphereGeometry(0.06, 12, 12), atlasMat);  
-  antTub.position.set(0, 0.58, 0.46);  
-  antTub.scale.set(1, 1.3, 0.8);  
+
+  const antTub = new THREE.Mesh(new THREE.SphereGeometry(0.055, 12, 12), atlasMat);  
+  antTub.position.copy(c1RingPoint(90)); antTub.position.y = C1_Y;  
+  antTub.scale.set(1, 1.25, 0.8);  
   c1Group.add(antTub);  
-  
-  const postArchCurve = new THREE.CatmullRomCurve3([  
-    new THREE.Vector3(-0.42, 0.48, -0.32),  
-    new THREE.Vector3(-0.28, 0.52, -0.55),  
-    new THREE.Vector3(-0.12, 0.54, -0.68),  
-    new THREE.Vector3(0, 0.55, -0.72),  
-    new THREE.Vector3(0.12, 0.54, -0.68),  
-    new THREE.Vector3(0.28, 0.52, -0.55),  
-    new THREE.Vector3(0.42, 0.48, -0.32)  
-  ]);  
-  const postArchGeo = new THREE.TubeGeometry(postArchCurve, 32, 0.065, 10, false);  
-  const postArch = new THREE.Mesh(postArchGeo, atlasMat);  
+
+  // Posterior arch -- broader sweep and slightly thicker tube than the
+  // anterior arch, matching real anatomy (the posterior arch is the
+  // larger of the two).  
+  const postArch = buildC1ArcTube(C1_POST_START, C1_POST_END, 16, 0.065);  
   postArch.castShadow = true;  
   c1Group.add(postArch);  
-  
-  const postTub = new THREE.Mesh(new THREE.SphereGeometry(0.055, 12, 12), atlasMat);  
-  postTub.position.set(0, 0.57, -0.74);  
-  postTub.scale.set(1, 1.2, 0.8);  
+
+  const postTub = new THREE.Mesh(new THREE.SphereGeometry(0.05, 12, 12), atlasMat);  
+  postTub.position.copy(c1RingPoint(270)); postTub.position.y = C1_Y;  
+  postTub.scale.set(1, 1.15, 0.8);  
   c1Group.add(postTub);  
-  
-  function createLateralMass(side) {  
-    const massGeo = new THREE.SphereGeometry(0.20, 24, 20);
-    const mass = new THREE.Mesh(massGeo, atlasMat);
-    mass.scale.set(0.95, 1.05, 0.70);
-    mass.rotation.z = side * 0.1;
-    mass.position.set(side * 0.48, 0.42, -0.05);  
-    mass.castShadow = true;  
-    return mass;  
+
+  // Lateral masses -- elongated capsules spanning between the anterior
+  // and posterior arch endpoints on each side (real lateral masses ARE
+  // anteroposteriorly elongated, so this is anatomically motivated, not
+  // just a connectivity trick). Length includes a verified overlap
+  // margin so the capsule's rounded ends genuinely enclose each arch
+  // endpoint rather than just touching it.  
+  const C1_MASS_RADIUS = 0.155;  
+  function designC1LateralMass(side) {  
+    const p1 = side > 0 ? c1RingPoint(C1_ANT_START) : c1RingPoint(C1_ANT_END);  
+    const p2 = side > 0 ? c1RingPoint(C1_POST_END) : c1RingPoint(C1_POST_START);  
+    const mid = p1.clone().lerp(p2, 0.5);  
+    const dir = p2.clone().sub(p1).normalize();  
+    const spanLength = p1.distanceTo(p2);  
+    const outwardDir = new THREE.Vector3(mid.x, 0, mid.z).normalize();  
+    const pushedCenter = mid.clone().addScaledVector(outwardDir, 0.10);  
+    return { center: pushedCenter, dir, spanLength };  
   }  
-  c1Group.add(createLateralMass(-1), createLateralMass(1));  
-  
-  function createC1Facet(side) {  
-    const facetGeo = new THREE.SphereGeometry(0.30, 20, 16);
-    const facet = new THREE.Mesh(facetGeo, atlasMat);
-    facet.scale.set(1.0, 0.55, 0.9);
-    facet.position.set(side * 0.50, 0.66, -0.05);  
-    facet.castShadow = true;  
-    return facet;  
+  function buildC1LateralMass(side) {  
+    const d = designC1LateralMass(side);  
+    const totalLen = d.spanLength + 0.09; // verified overlap margin -- see design notes above  
+    const cylLen = Math.max(0.02, totalLen - 2 * C1_MASS_RADIUS);  
+    const geo = new THREE.CapsuleGeometry(C1_MASS_RADIUS, cylLen, 4, 12);  
+    const mesh = new THREE.Mesh(geo, atlasMat);  
+    mesh.position.copy(d.center);  
+    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.dir);  
+    mesh.castShadow = true;  
+    return { mesh, center: d.center, dir: d.dir };  
   }  
-  c1Group.add(createC1Facet(-1), createC1Facet(1));  
-  
-  function createC1FacetCart(side) {  
-    const cartGeo = new THREE.SphereGeometry(0.30, 20, 16);
-    const cart = new THREE.Mesh(cartGeo, facetMat);
-    cart.scale.set(0.95, 0.5, 0.85);
-    cart.position.set(side * 0.50, 0.65, -0.05);  
-    return cart;  
+  const c1MassL = buildC1LateralMass(-1);  
+  const c1MassR = buildC1LateralMass(1);  
+  c1Group.add(c1MassL.mesh, c1MassR.mesh);  
+
+  // Superior articular facets -- oval, sitting directly on top of each
+  // lateral mass (overlapping it, not floating above with a gap), long
+  // axis aligned with the mass's own anteroposterior axis, matching the
+  // real oval/kidney shape of the superior facet.  
+  function buildC1SuperiorFacet(massInfo, mat){  
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.185, 20, 16), mat);  
+    mesh.scale.set(1.0, 0.45, 1.3);  
+    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), massInfo.dir);  
+    mesh.position.copy(massInfo.center).addScaledVector(new THREE.Vector3(0,1,0), C1_MASS_RADIUS * 0.75);  
+    return mesh;  
   }  
-  c1Group.add(createC1FacetCart(-1), createC1FacetCart(1));  
-  
+  const c1FacetL = buildC1SuperiorFacet(c1MassL, atlasMat); c1FacetL.castShadow = true;  
+  const c1FacetR = buildC1SuperiorFacet(c1MassR, atlasMat); c1FacetR.castShadow = true;  
+  c1Group.add(c1FacetL, c1FacetR);  
+  c1Group.add(buildC1SuperiorFacet(c1MassL, facetMat), buildC1SuperiorFacet(c1MassR, facetMat));  
+
+  // Inferior articular facets -- smaller ovals on the underside of each
+  // lateral mass, where C1 articulates with C2's superior facets below.  
+  function buildC1InferiorFacet(massInfo){  
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.145, 16, 14), atlasMat);  
+    mesh.scale.set(1.0, 0.4, 1.1);  
+    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), massInfo.dir);  
+    mesh.position.copy(massInfo.center).addScaledVector(new THREE.Vector3(0,1,0), -C1_MASS_RADIUS * 0.8);  
+    mesh.castShadow = true;  
+    return mesh;  
+  }  
+  c1Group.add(buildC1InferiorFacet(c1MassL), buildC1InferiorFacet(c1MassR));  
+
+  // Transverse processes -- unchanged technique (wing shape with a
+  // genuine transverse-foramen hole), just repositioned to correctly
+  // emerge from the new lateral mass locations computed above.  
   const c1WingShape = buildWingShape(0.40, 0.26, 0.11, 0.062, 0.15);
   const c1WingGeo = new THREE.ExtrudeGeometry(c1WingShape, {
     depth: 0.07, bevelEnabled: true, bevelThickness: 0.012, bevelSize: 0.012, bevelSegments: 2
   });
-  function createC1Transverse(side) {  
+  function createC1Transverse(massInfo, side) {  
     const tp = new THREE.Mesh(c1WingGeo, atlasMat);
     tp.rotation.x = -Math.PI / 2;
     if (side < 0) tp.rotation.z = Math.PI;
-    tp.position.set(side * 0.46, 0.36, -0.10);  
+    const outDir = new THREE.Vector3(massInfo.center.x, 0, massInfo.center.z).normalize();  
+    tp.position.copy(massInfo.center).addScaledVector(outDir, 0.10);  
+    tp.position.y -= 0.05;  
     tp.castShadow = true;  
     return tp;  
   }  
-  c1Group.add(createC1Transverse(-1), createC1Transverse(1));  
-  
+  c1Group.add(createC1Transverse(c1MassL, -1), createC1Transverse(c1MassR, 1));  
+
   group.add(c1Group);  
   
   // Transverse ligament — passes POSTERIOR to the dens (negative z),
