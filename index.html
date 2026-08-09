@@ -48,39 +48,26 @@
   .submenu-row{display:flex;gap:5px;flex-wrap:wrap;justify-content:center;margin-top:24px;position:relative}  
   /* Branching connector for the submenu row -- one trunk (the existing
      .bl.g stub above) splits into a horizontal bar, then one arrow per
-     button. Both the horizontal bar AND the arrow are built per-button
-     (not as one shared element spanning the row), each centered on
-     that button via left:50% + translateX(-50%). This is what
-     guarantees correct alignment regardless of actual rendered widths
-     -- "Ball & Socket" is visibly wider than "Pivot" or "Hinge", so
-     any approach that guesses one shared span (e.g. percentages of the
-     row) reliably falls short of at least one branch; verified against
-     an actual rendered screenshot where a percentage-based bar left
-     the Hinge branch visibly disconnected. Each button's own 100px-wide
-     segment is generously sized (verified to comfortably overlap its
-     neighbor's segment even in the widest realistic case) so the
-     combined result reads as one continuous bar without needing to
-     know any other button's width. */
+     button. The horizontal bar is positioned by JS (see
+     updateSubmenuBar below), not CSS guesswork -- two earlier attempts
+     at guessing its span with fixed percentages or fixed per-button
+     reach distances each produced a different visible alignment bug
+     once actually rendered (confirmed against real screenshots), since
+     "Ball & Socket" is meaningfully wider than "Pivot" or "Hinge" and
+     no fixed CSS value reliably works for all three simultaneously.
+     Measuring the real rendered button positions is the only way to
+     guarantee this is actually correct. The arrows are still pure CSS
+     (.sub-btn::after below) since those were never the problem --
+     centering an arrow on its OWN button via left:50% is exact by
+     construction, regardless of that button's width. */
   .sub-btn{position:relative}
-  .sub-btn::before{
-    content:'';
+  #submenuBar{
     position:absolute;
-    top:-20px; left:50%;
-    width:100px; height:2px;
+    top:-20px;
+    height:2px;
     background:#4a8a4a;
-    transform:translateX(-50%);
     z-index:0;
-  }
-  /* First/last buttons only need their bar to reach toward the middle
-     button (that's the only neighbor they overlap with) -- the default
-     rule above extends 50px in BOTH directions from center, which left
-     a dangling stub of line hanging past the outermost arrows on the
-     outer side with nothing there to connect to. */
-  .sub-btn:first-child::before{
-    left:50%; width:50px; transform:none;
-  }
-  .sub-btn:last-child::before{
-    left:auto; right:50%; width:50px; transform:none;
+    pointer-events:none;
   }
   .sub-btn::after{
     content:'';
@@ -265,6 +252,43 @@
       document.getElementById('flowchart').classList.add('revealed');
     }, 1800);
   };
+  // Positions the submenu's horizontal branch bar to span exactly from
+  // the first button's real center to the last button's real center,
+  // measured via getBoundingClientRect rather than guessed in CSS --
+  // "Ball & Socket" is meaningfully wider than "Pivot" or "Hinge", so
+  // no fixed CSS value worked correctly for all three simultaneously
+  // (confirmed by two separate rendering bugs against real
+  // screenshots). Runs via ResizeObserver on .submenu-row itself, which
+  // fires whenever the row's size changes -- including when it goes
+  // from display:none to visible, and on any window resize/orientation
+  // change -- so this needs no hook into show() or any other existing
+  // logic.
+  function updateSubmenuBar(){
+    var row = document.querySelector('.submenu-row');
+    if (!row) return;
+    var buttons = row.querySelectorAll('.sub-btn');
+    if (buttons.length < 2) return;
+    var rowRect = row.getBoundingClientRect();
+    if (rowRect.width === 0) return; // hidden -- nothing to measure yet
+    var firstRect = buttons[0].getBoundingClientRect();
+    var lastRect = buttons[buttons.length - 1].getBoundingClientRect();
+    var firstCenter = (firstRect.left + firstRect.right) / 2 - rowRect.left;
+    var lastCenter = (lastRect.left + lastRect.right) / 2 - rowRect.left;
+    var bar = document.getElementById('submenuBar');
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'submenuBar';
+      row.appendChild(bar);
+    }
+    bar.style.left = firstCenter + 'px';
+    bar.style.width = (lastCenter - firstCenter) + 'px';
+  }
+  if (typeof ResizeObserver !== 'undefined') {
+    var submenuRowEl = document.querySelector('.submenu-row');
+    if (submenuRowEl) new ResizeObserver(updateSubmenuBar).observe(submenuRowEl);
+  }
+  window.addEventListener('resize', updateSubmenuBar);
+  updateSubmenuBar();
 </script>  <script type="importmap">  
 {  
   "imports": {  
